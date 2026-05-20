@@ -188,9 +188,7 @@ codex exec resume --json <thread_id> <prompt>
 
 ```text
 /speed fast
-/speed normal
-/speed deep
-/speed max
+/speed standard
 ```
 
 恢复默认速度：
@@ -199,19 +197,17 @@ codex exec resume --json <thread_id> <prompt>
 /speed default
 ```
 
-速度会映射到 Codex 的 `model_reasoning_effort`：
+速度对应 Codex UI 里的「速度」设置：
 
-- `fast` / `快速` -> `low`
-- `normal` / `标准` -> `medium`
-- `deep` / `深入` -> `high`
-- `max` / `极致` -> `xhigh`
+- `standard` / `标准`：默认速度，常规用量。
+- `fast` / `快速`：1.5 倍速，用量增加。
 
 中文命令：
 
 ```text
 当前速度
 切换速度 快速
-速度 深入
+速度 标准
 ```
 
 相关环境变量：

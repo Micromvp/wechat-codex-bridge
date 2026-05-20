@@ -36,29 +36,14 @@ SESSION_ID_RE = re.compile(
     r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
 )
 MODEL_RE = re.compile(r"^[A-Za-z0-9._:-]+$")
-SPEED_TO_EFFORT = {
-    "fast": "low",
-    "quick": "low",
-    "low": "low",
-    "快": "low",
-    "快速": "low",
-    "normal": "medium",
-    "medium": "medium",
-    "balanced": "medium",
-    "标准": "medium",
-    "普通": "medium",
-    "默认": "medium",
-    "deep": "high",
-    "slow": "high",
-    "high": "high",
-    "慢": "high",
-    "深入": "high",
-    "深度": "high",
-    "max": "xhigh",
-    "xhigh": "xhigh",
-    "最高": "xhigh",
-    "极致": "xhigh",
+SPEED_TO_SERVICE_TIER = {
+    "fast": "priority",
+    "quick": "priority",
+    "priority": "priority",
+    "快速": "priority",
+    "快": "priority",
 }
+STANDARD_SPEED_VALUES = {"standard", "normal", "default", "reset", "标准", "普通", "默认", "清空"}
 CHANNEL_VERSION = "2.1.8"
 ILINK_APP_ID = "bot"
 ILINK_APP_CLIENT_VERSION = str((2 << 16) | (1 << 8) | 8)
@@ -245,15 +230,20 @@ def set_session_model(sessions, key, model):
 
 
 def normalize_speed(value):
-    return SPEED_TO_EFFORT.get(value.strip().lower())
+    value = value.strip()
+    lowered = value.lower()
+    if lowered in STANDARD_SPEED_VALUES or value in STANDARD_SPEED_VALUES:
+        return None
+    return SPEED_TO_SERVICE_TIER.get(lowered) or SPEED_TO_SERVICE_TIER.get(value)
 
 
-def set_session_effort(sessions, key, effort):
+def set_session_speed(sessions, key, service_tier):
     session = sessions.setdefault(key, {})
-    if effort.lower() in ("default", "reset") or effort in ("默认", "清空"):
-        session.pop("codex_reasoning_effort", None)
+    session.pop("codex_reasoning_effort", None)
+    if service_tier:
+        session["codex_service_tier"] = service_tier
     else:
-        session["codex_reasoning_effort"] = effort
+        session.pop("codex_service_tier", None)
     session["updated_at"] = int(time.time())
     save_sessions(sessions)
 
@@ -262,12 +252,12 @@ def session_settings_text(session):
     thread_id = session.get("codex_thread_id") or "未绑定"
     thread_name = session.get("codex_thread_name") or "未命名"
     model = session.get("codex_model") or "默认"
-    effort = session.get("codex_reasoning_effort") or "默认"
+    speed = "快速" if session.get("codex_service_tier") == "priority" else "标准"
     return (
         "当前微信用户设置：\n"
         f"session: {thread_name}\n{thread_id}\n"
         f"model: {model}\n"
-        f"speed/reasoning: {effort}"
+        f"speed: {speed}"
     )
 
 
@@ -323,25 +313,27 @@ def handle_control_command(text, sessions, key):
         current = (sessions.get(key) or {}).get("codex_model") or "默认"
         return f"已切换当前微信用户的 Codex 模型：{current}"
 
-    if lowered in ("/speed", "speed", "/effort", "effort", "速度", "当前速度"):
-        effort = (sessions.get(key) or {}).get("codex_reasoning_effort") or "默认"
+    if lowered in ("/speed", "speed", "速度", "当前速度"):
+        speed = "快速" if (sessions.get(key) or {}).get("codex_service_tier") == "priority" else "标准"
         return (
-            f"当前速度/推理强度：{effort}\n"
-            "可选：fast/normal/deep/max，或 快速/标准/深入/极致。\n"
-            "发送 /speed default 恢复默认。"
+            f"当前速度：{speed}\n"
+            "可选：standard/fast，或 标准/快速。\n"
+            "发送 /speed fast 开启 1.5 倍速；发送 /speed standard 恢复标准速度。"
         )
 
-    if lowered.startswith("/speed ") or lowered.startswith("/effort ") or stripped.startswith("切换速度 ") or stripped.startswith("速度 "):
+    if lowered.startswith("/speed ") or stripped.startswith("切换速度 ") or stripped.startswith("速度 "):
         value = stripped.split(maxsplit=1)[1].strip()
-        if value.lower() in ("default", "reset") or value in ("默认", "清空"):
-            set_session_effort(sessions, key, value)
+        if value.lower() in STANDARD_SPEED_VALUES or value in STANDARD_SPEED_VALUES:
+            set_session_speed(sessions, key, None)
+            return "已切换当前微信用户的速度：标准"
+        service_tier = normalize_speed(value)
+        if not service_tier:
+            return "速度档位不支持。可选：standard/fast，或 标准/快速。"
+        set_session_speed(sessions, key, service_tier)
+        if service_tier == "priority":
+            return "已切换当前微信用户的速度：快速（1.5 倍速，用量增加）"
         else:
-            effort = normalize_speed(value)
-            if not effort:
-                return "速度档位不支持。可选：fast/normal/deep/max，或 快速/标准/深入/极致。"
-            set_session_effort(sessions, key, effort)
-        current = (sessions.get(key) or {}).get("codex_reasoning_effort") or "默认"
-        return f"已切换当前微信用户的速度/推理强度：{current}"
+            return f"已切换当前微信用户的速度：{service_tier}"
 
     return None
 
@@ -450,7 +442,7 @@ def format_command(command, prompt, thread_id=None):
     return args, stdin
 
 
-def apply_codex_overrides(args, model=None, reasoning_effort=None):
+def apply_codex_overrides(args, model=None, service_tier=None):
     if len(args) < 2 or args[0] != "codex" or args[1] != "exec":
         return args
     insert_at = 2
@@ -459,8 +451,8 @@ def apply_codex_overrides(args, model=None, reasoning_effort=None):
     overrides = []
     if model:
         overrides.extend(["--model", model])
-    if reasoning_effort:
-        overrides.extend(["-c", f'model_reasoning_effort="{reasoning_effort}"'])
+    if service_tier:
+        overrides.extend(["-c", f'service_tier="{service_tier}"'])
     return args[:insert_at] + overrides + args[insert_at:]
 
 
@@ -483,9 +475,9 @@ def parse_codex_json_output(stdout):
     return thread_id, reply
 
 
-def run_codex(prompt, command, timeout, thread_id=None, model=None, reasoning_effort=None):
+def run_codex(prompt, command, timeout, thread_id=None, model=None, service_tier=None):
     args, stdin = format_command(command, prompt, thread_id=thread_id)
-    args = apply_codex_overrides(args, model=model, reasoning_effort=reasoning_effort)
+    args = apply_codex_overrides(args, model=model, service_tier=service_tier)
     result = subprocess.run(
         args,
         input=stdin,
@@ -499,10 +491,10 @@ def run_codex(prompt, command, timeout, thread_id=None, model=None, reasoning_ef
     return extract_reply(result.stdout)
 
 
-def run_codex_thread(prompt, create_command, resume_command, timeout, thread_id=None, model=None, reasoning_effort=None):
+def run_codex_thread(prompt, create_command, resume_command, timeout, thread_id=None, model=None, service_tier=None):
     command = resume_command if thread_id else create_command
     args, stdin = format_command(command, prompt, thread_id=thread_id)
-    args = apply_codex_overrides(args, model=model, reasoning_effort=reasoning_effort)
+    args = apply_codex_overrides(args, model=model, service_tier=service_tier)
     result = subprocess.run(
         args,
         input=stdin,
@@ -592,7 +584,7 @@ def run_loop(args):
                     session = sessions.setdefault(key, {})
                     thread_id = session.get("codex_thread_id") if args.native_session else None
                     model = session.get("codex_model")
-                    reasoning_effort = session.get("codex_reasoning_effort")
+                    service_tier = session.get("codex_service_tier")
                     prompt = build_prompt(text, message, history, use_native_session=args.native_session)
                     if args.native_session:
                         thread_id, reply = run_codex_thread(
@@ -602,7 +594,7 @@ def run_loop(args):
                             args.codex_timeout,
                             thread_id=thread_id,
                             model=model,
-                            reasoning_effort=reasoning_effort,
+                            service_tier=service_tier,
                         )
                         if thread_id:
                             session["codex_thread_id"] = thread_id
@@ -616,7 +608,7 @@ def run_loop(args):
                             args.codex_command,
                             args.codex_timeout,
                             model=model,
-                            reasoning_effort=reasoning_effort,
+                            service_tier=service_tier,
                         )
                 except Exception as exc:
                     reply = f"Codex 执行失败：{exc}"
