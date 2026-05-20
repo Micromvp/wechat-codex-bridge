@@ -152,6 +152,22 @@ codex exec resume --json <thread_id> <prompt>
 /settings
 ```
 
+查看剩余额度：
+
+```text
+/quota
+```
+
+`/quota` 会执行启动 bridge 时配置的 `WEIXIN_CODEX_QUOTA_COMMAND`，并把命令输出原样发回微信。Codex CLI 当前没有稳定的内置额度查询子命令，所以这里预留为可配置命令，方便接你自己的余额/额度 API。
+
+示例：
+
+```bash
+export WEIXIN_CODEX_QUOTA_COMMAND='python3 scripts/query_quota.py'
+export WEIXIN_CODEX_QUOTA_TIMEOUT=30
+./start_weixin_codex_direct.sh
+```
+
 查看当前模型：
 
 ```text
