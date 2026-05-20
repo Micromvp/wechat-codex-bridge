@@ -87,7 +87,37 @@ Codex Desktop
 
 这个模式会为每个微信用户绑定一个 Codex thread id。第一条消息创建 Codex 会话，后续消息使用 `codex exec resume` 继续同一个会话，避免 Codex 很快忘记上下文。
 
-你也可以在微信里发送 `/session <thread_id>`，把当前微信用户切换到某个指定的 Codex 会话；发送 `/sessions` 可以列出最近的 Codex sessions。
+### 在微信里切换指定 Codex session
+
+直连 ClawBot 模式支持在微信聊天里发送控制命令。控制命令由本地 bridge 处理，不会转发给 Codex。
+
+查看当前微信用户绑定的 Codex session：
+
+```text
+/session
+```
+
+列出最近的 Codex sessions：
+
+```text
+/sessions
+```
+
+切换到指定 Codex session：
+
+```text
+/session 019e4447-e663-7011-99b5-5e1f5d7e380a
+```
+
+也可以使用中文命令：
+
+```text
+当前会话
+会话列表
+切换会话 019e4447-e663-7011-99b5-5e1f5d7e380a
+```
+
+切换后，这个微信用户后续发送的普通消息都会通过 `codex exec resume --json <thread_id> <prompt>` 继续指定的 Codex 会话。
 
 ## 桌面辅助模式首次使用
 
