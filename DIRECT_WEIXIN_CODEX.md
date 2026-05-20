@@ -1,104 +1,144 @@
-# Direct WeChat ClawBot to Codex
+# 直连微信 ClawBot 到 Codex
 
-This mode bypasses OpenClaw Gateway for agent execution.
+这个模式会绕过 OpenClaw Gateway 的 agent 执行层。
 
-It still uses Tencent's official WeChat ClawBot login and message transport, but the local loop is:
+它仍然复用腾讯官方 WeChat ClawBot 的登录和消息通道，但本地执行链路变成：
 
 ```text
-WeChat ClawBot
--> Tencent ilink bot API
+微信 ClawBot
+-> 腾讯 ilink bot API
 -> scripts/weixin_codex_direct.py
--> codex exec
+-> codex exec / codex exec resume
 -> ilink/bot/sendmessage
--> WeChat ClawBot conversation
+-> 微信 ClawBot 聊天窗口
 ```
 
-## Prerequisites
+## 前置条件
 
-1. Install and authorize the official WeChat channel once:
+1. 安装并授权官方微信 channel：
 
 ```bash
 npx -y @tencent-weixin/openclaw-weixin-cli install
 openclaw channels login --channel openclaw-weixin
 ```
 
-2. Confirm an account file exists:
+2. 确认本地存在账号文件：
 
 ```bash
 ls ~/.openclaw/openclaw-weixin/accounts/*.json
 ```
 
-## Avoid duplicate consumers
+`scripts/weixin_codex_direct.py` 会从这个账号文件读取 `token` 和 `baseUrl`，直接调用腾讯 ilink bot API。
 
-If OpenClaw Gateway is also running the `openclaw-weixin` channel, it may consume the same messages.
+## 避免重复消费消息
 
-For a pure direct Codex path, disable the OpenClaw plugin before starting this bridge:
+如果 OpenClaw Gateway 同时启用了 `openclaw-weixin` channel，它可能会和本 bridge 同时消费同一批微信消息，导致重复回复。
+
+如果你希望走纯直连 Codex 路径，启动本 bridge 前建议禁用 OpenClaw 里的微信插件：
 
 ```bash
 openclaw config set plugins.entries.openclaw-weixin.enabled false
 openclaw gateway restart
 ```
 
-You can re-enable it later:
+需要恢复 OpenClaw 微信 channel 时再打开：
 
 ```bash
 openclaw config set plugins.entries.openclaw-weixin.enabled true
 openclaw gateway restart
 ```
 
-## Start
+## 启动
 
 ```bash
 cd /path/to/wechat-codex-bridge
 ./start_weixin_codex_direct.sh
 ```
 
-Or run it in a detached screen session:
+后台启动可以用 `screen`：
 
 ```bash
 screen -dmS weixin-codex-direct /bin/bash -lc 'cd /path/to/wechat-codex-bridge && ./start_weixin_codex_direct.sh'
 ```
 
-## Custom Codex command
+查看日志：
 
 ```bash
-export WEIXIN_CODEX_COMMAND='codex exec --cd /path/to/your/workspace --sandbox workspace-write {prompt}'
-./start_weixin_codex_direct.sh
+tail -f data/weixin-codex-direct.log
 ```
 
-## Conversation memory
-
-The direct bridge keeps a per-WeChat-user Codex thread id and fallback conversation history in:
-
-```text
-/path/to/wechat-codex-bridge/data/weixin-codex-sessions.json
-```
-
-By default, each WeChat user is bound to one native Codex session id. The first message creates a Codex thread, and later messages use:
-
-```bash
-codex exec resume --json <thread_id> <prompt>
-```
-
-It also keeps the last 20 turns as a fallback/debug history:
-
-```bash
-export WEIXIN_CODEX_NATIVE_SESSION=true
-export WEIXIN_CODEX_HISTORY_TURNS=20
-./start_weixin_codex_direct.sh
-```
-
-From WeChat, send `/reset` or `清空上下文` to clear your current ClawBot user's Codex session binding.
-
-## Stop
+停止：
 
 ```bash
 screen -S weixin-codex-direct -X quit
 ```
 
-## Notes
+## 自定义 Codex 工作目录
 
-- The script handles text messages and voice messages that include text transcription.
-- It sends text replies only.
-- It reuses `context_token` from inbound messages when replying, which is required by the WeChat backend.
-- It stores the long-poll cursor in `~/.openclaw/openclaw-weixin/accounts/<account>.sync.json`.
+默认情况下，Codex 在当前仓库目录中执行。你可以通过 `WEIXIN_CODEX_CWD` 指定实际项目目录：
+
+```bash
+export WEIXIN_CODEX_CWD='/path/to/your/workspace'
+./start_weixin_codex_direct.sh
+```
+
+也可以完全覆盖创建新会话的命令：
+
+```bash
+export WEIXIN_CODEX_COMMAND='codex exec --json --cd /path/to/your/workspace --sandbox workspace-write {prompt}'
+./start_weixin_codex_direct.sh
+```
+
+## 会话记忆
+
+直连 bridge 会为每个微信用户保存一个 Codex thread id，以及一份 fallback 聊天历史：
+
+```text
+data/weixin-codex-sessions.json
+```
+
+默认行为：
+
+- 第一条微信消息创建新的 Codex thread。
+- 后续同一个微信用户的消息使用 `codex exec resume --json <thread_id> <prompt>` 继续同一个会话。
+- 本地额外保留最近 20 轮对话，作为调试和 fallback 使用。
+- 每次拿到 Codex thread id 后，会把它追加写入 `~/.codex/session_index.jsonl`，方便 Codex Desktop 的会话列表识别。
+
+相关环境变量：
+
+```bash
+export WEIXIN_CODEX_NATIVE_SESSION=true
+export WEIXIN_CODEX_HISTORY_TURNS=20
+export WEIXIN_CODEX_RESUME_COMMAND='codex exec resume --json {thread_id} {prompt}'
+./start_weixin_codex_direct.sh
+```
+
+在微信里发送下面任意一种命令，可以清空当前微信用户绑定的 Codex session：
+
+```text
+/reset
+reset
+清空上下文
+重置上下文
+```
+
+## 去重和单实例
+
+bridge 会做两层保护，避免重复回复：
+
+- 进程锁：`data/weixin-codex-direct.lock` 防止多个 bridge 实例同时运行。
+- 消息去重：`data/weixin-codex-seen.json` 记录已处理的微信消息 id。
+
+如果你看到微信里重复回复，优先检查是否有多个进程：
+
+```bash
+ps aux | rg 'weixin_codex_direct|start_weixin_codex_direct'
+```
+
+## 注意事项
+
+- 当前处理文本消息，以及带文本转写的语音消息。
+- 当前只发送文本回复。
+- 回复时会复用入站消息的 `context_token`，这是微信后端发回同一聊天所需的信息。
+- 长轮询 cursor 会写入 `~/.openclaw/openclaw-weixin/accounts/<account>.sync.json`。
+- `data/` 目录包含本地运行状态和聊天记录，不要提交到 git。

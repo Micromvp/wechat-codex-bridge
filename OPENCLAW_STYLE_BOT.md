@@ -1,24 +1,24 @@
-# OpenClaw-style WeChat Bot Bridge
+# 类 OpenClaw 的微信 Bot Bridge
 
-This file describes the corrected architecture for using WeChat as the entry point.
+这份文档说明如何用微信作为入口，让用户在微信里给 bot 发消息，后端 agent 执行后，再把结果发回同一个微信聊天窗口。
 
-## What OpenClaw does
+## OpenClaw 的基本思路
 
-OpenClaw treats chat apps as channels. A channel receives an inbound chat message, passes it to the Gateway or agent runtime, then sends the agent reply back through the same chat channel.
+OpenClaw 把聊天应用看作 channel。一个 channel 负责接收入站聊天消息，把消息交给 Gateway 或 agent runtime，然后把 agent 的回复通过同一个 channel 发回去。
 
-For WeChat, there are two practical routes:
+微信场景通常有两条可行路径：
 
-- Existing OpenClaw channel plugin: install a community WeChat plugin and let OpenClaw own the full channel lifecycle.
-- Local bridge: use a WeChat bot or PC-WeChat bridge to POST messages into this service, then this service runs an agent command and returns the reply.
+- 使用已有 OpenClaw 微信 channel 插件，让 OpenClaw 接管完整 channel 生命周期。
+- 使用本仓库的本地 bridge，由微信 bot 或 PC 微信自动化把消息 POST 进来，再由 bridge 调用 agent 命令并返回回复。
 
-## Existing OpenClaw channel options
+## 已有 OpenClaw channel 选择
 
-Community plugin examples found during research:
+调研中见到的社区插件例子：
 
-- `@thesomewhatyou/openclaw-wechat`: WeChat Official Account channel using plaintext webhooks.
-- `@canghe/openclaw-wechat`: Community WeChat channel plugin listed in public plugin directories.
+- `@thesomewhatyou/openclaw-wechat`：基于微信公众号明文 webhook 的 channel。
+- `@canghe/openclaw-wechat`：公开插件目录中出现过的社区微信 channel。
 
-Typical OpenClaw setup shape:
+典型 OpenClaw 配置形态：
 
 ```bash
 openclaw plugins install @thesomewhatyou/openclaw-wechat
@@ -26,31 +26,31 @@ openclaw plugins enable wechat
 openclaw gateway restart
 ```
 
-Then configure a WeChat Official Account webhook path such as `/wechat/webhook`.
+然后在微信公众号后台配置 webhook，例如 `/wechat/webhook`。
 
-## This repo's MVP bridge
+## 本仓库的 MVP bridge
 
-The current bridge exposes two bot-style inbound endpoints:
+当前 bridge 暴露两类 bot 入站接口：
 
-- `POST /bot/webhook`: JSON endpoint for a personal WeChat bot bridge.
-- `GET|POST /wechat/webhook`: WeChat Official Account plaintext webhook compatibility.
-- `GET /bot/replies/{job_id}`: Async job lookup for adapters that cannot wait.
-- `POST /bot/ack`: Mark an outbox reply as sent by the adapter.
+- `POST /bot/webhook`：给个人微信 bot bridge 使用的 JSON 接口。
+- `GET|POST /wechat/webhook`：兼容微信公众号明文 webhook。
+- `GET /bot/replies/{job_id}`：异步任务查询接口，适合不能长时间等待的 adapter。
+- `POST /bot/ack`：adapter 成功发出消息后，用于确认 outbox 消息已发送。
 
-Both paths call the same internal flow:
+两条路径内部走同一套流程：
 
 ```text
-WeChat message
--> bot adapter or Official Account webhook
+微信消息
+-> bot adapter 或公众号 webhook
 -> wechat_bridge_service.py
 -> WECHAT_AGENT_COMMAND
--> JSON or XML reply
--> WeChat bot adapter sends reply back
+-> JSON 或 XML 回复
+-> 微信 bot adapter 发回微信
 ```
 
-## JSON personal bot contract
+## 个人微信 bot JSON 合约
 
-Request:
+请求示例：
 
 ```json
 {
@@ -63,7 +63,7 @@ Request:
 }
 ```
 
-Response:
+同步响应示例：
 
 ```json
 {
@@ -78,15 +78,15 @@ Response:
 }
 ```
 
-Any personal WeChat bridge can use this by:
+任何个人微信 bridge 都可以按这个流程接入：
 
-1. Listening for incoming WeChat messages.
-2. POSTing the message to `http://127.0.0.1:8787/bot/webhook`.
-3. Taking `reply` from the JSON response.
-4. Sending that text back to the same WeChat chat.
-5. POSTing `/bot/ack` after the send succeeds.
+1. 监听微信入站消息。
+2. 把消息 POST 到 `http://127.0.0.1:8787/bot/webhook`。
+3. 从 JSON 响应里取 `reply`。
+4. 把 `reply` 发回同一个微信聊天。
+5. 发送成功后 POST `/bot/ack`。
 
-Async request:
+异步请求示例：
 
 ```json
 {
@@ -99,7 +99,7 @@ Async request:
 }
 ```
 
-Async response:
+异步响应示例：
 
 ```json
 {
@@ -109,72 +109,76 @@ Async response:
 }
 ```
 
-Poll:
+轮询结果：
 
 ```bash
 curl -s http://127.0.0.1:8787/bot/replies/job-uuid
 ```
 
-When `job.status` is `completed`, send `job.result.reply` back to WeChat.
+当 `job.status` 为 `completed` 时，把 `job.result.reply` 发回微信。
 
-Adapter field mapping is captured in `examples/personal-wechat-adapter.example.json`.
+adapter 字段映射可以参考：
 
-## Agent command
+```text
+examples/personal-wechat-adapter.example.json
+```
 
-By default, the bridge uses a mock agent so the webhook can be tested immediately.
+## Agent 命令
 
-Set `WECHAT_AGENT_COMMAND` to run a real backend agent.
+默认情况下，bridge 使用 mock agent，方便你立刻测试 webhook。
 
-Sample local agent:
+通过 `WECHAT_AGENT_COMMAND` 可以接入真实后端 agent。
+
+使用内置 sample agent：
 
 ```bash
 export WECHAT_AGENT_COMMAND='python3 scripts/sample_agent.py'
 ./start_wechat_bridge.sh
 ```
 
-Codex example:
+使用 Codex：
 
 ```bash
 export WECHAT_AGENT_COMMAND='codex exec --cd /path/to/your/workspace --sandbox workspace-write {prompt}'
 ./start_wechat_bridge.sh
 ```
 
-OpenClaw local agent example:
+使用 OpenClaw local agent：
 
 ```bash
 export WECHAT_AGENT_COMMAND='openclaw agent --local --message {prompt}'
 ./start_wechat_bridge.sh
 ```
 
-OpenClaw Gateway example:
+使用 OpenClaw Gateway：
 
 ```bash
 export WECHAT_AGENT_COMMAND='openclaw agent --message {prompt} --json'
 ./start_wechat_bridge.sh
 ```
 
-If `{prompt}` is omitted, the bridge sends the prompt on stdin.
+如果命令里没有 `{prompt}`，bridge 会把 prompt 通过 stdin 传给 agent。
 
-## Official Account webhook
+## 微信公众号 webhook
 
-Set a token and expose the service to WeChat:
+设置 token 并启动 bridge：
 
 ```bash
 export WECHAT_PUBLIC_TOKEN='your-wechat-token'
 ./start_wechat_bridge.sh
 ```
 
-Configure WeChat server URL:
+在微信公众号后台配置服务器 URL：
 
 ```text
 https://your-public-host/wechat/webhook
 ```
 
-The official account route supports plaintext text messages. If the agent takes longer than WeChat's reply window, move to async custom message API or use the JSON personal bot route.
+当前公众号 route 支持明文文本消息。如果 agent 执行时间超过微信被动回复窗口，需要改成异步客服消息 API，或者使用 JSON personal bot route。
 
-## Safety notes
+## 安全建议
 
-- Keep `WECHAT_BRIDGE_TOKEN` enabled if the endpoint is reachable beyond localhost.
-- Do not expose this bridge directly to the internet without HTTPS and authentication.
-- Start with a mock agent or a low-risk command before wiring it to a code-writing agent.
-- Pass WeChat's native message id as `message_id`; the bridge uses it for duplicate suppression.
+- 如果 endpoint 不只监听 localhost，请开启 `WECHAT_BRIDGE_TOKEN`。
+- 不要在没有 HTTPS 和认证的情况下把 bridge 直接暴露到公网。
+- 接入会写代码、执行命令的 agent 前，先用 mock agent 或低风险命令验证消息链路。
+- 尽量传入微信原生 `message_id`，bridge 会用它做重复消息抑制。
