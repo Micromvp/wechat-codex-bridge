@@ -119,6 +119,58 @@ Codex Desktop
 
 切换后，这个微信用户后续发送的普通消息都会通过 `codex exec resume --json <thread_id> <prompt>` 继续指定的 Codex 会话。
 
+### 在微信里切模型和速度
+
+模型和速度设置也是按微信用户保存的，不会修改全局 `~/.codex/config.toml`。
+
+查看当前设置：
+
+```text
+/settings
+```
+
+查看或切换模型：
+
+```text
+/model
+/model gpt-5.5
+/model default
+```
+
+中文命令也支持：
+
+```text
+当前模型
+切换模型 gpt-5.5
+模型 gpt-5.5
+```
+
+查看或切换速度：
+
+```text
+/speed
+/speed fast
+/speed normal
+/speed deep
+/speed max
+/speed default
+```
+
+速度会映射到 Codex 的 `model_reasoning_effort`：
+
+- `fast` / `快速` -> `low`
+- `normal` / `标准` -> `medium`
+- `deep` / `深入` -> `high`
+- `max` / `极致` -> `xhigh`
+
+中文命令也支持：
+
+```text
+当前速度
+切换速度 快速
+速度 深入
+```
+
 ## 桌面辅助模式首次使用
 
 1. 在这台 Mac 上打开微信，并保持登录。

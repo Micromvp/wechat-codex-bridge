@@ -142,6 +142,78 @@ codex exec resume --json <thread_id> <prompt>
 
 继续你指定的 Codex session。
 
+## 在微信里切模型和速度
+
+模型和速度设置按微信用户保存，只影响该微信用户后续发给 Codex 的消息，不会修改全局 `~/.codex/config.toml`。
+
+查看当前设置：
+
+```text
+/settings
+```
+
+查看当前模型：
+
+```text
+/model
+```
+
+切换模型：
+
+```text
+/model gpt-5.5
+```
+
+恢复默认模型：
+
+```text
+/model default
+```
+
+中文命令：
+
+```text
+当前模型
+切换模型 gpt-5.5
+模型 gpt-5.5
+```
+
+查看当前速度：
+
+```text
+/speed
+```
+
+切换速度：
+
+```text
+/speed fast
+/speed normal
+/speed deep
+/speed max
+```
+
+恢复默认速度：
+
+```text
+/speed default
+```
+
+速度会映射到 Codex 的 `model_reasoning_effort`：
+
+- `fast` / `快速` -> `low`
+- `normal` / `标准` -> `medium`
+- `deep` / `深入` -> `high`
+- `max` / `极致` -> `xhigh`
+
+中文命令：
+
+```text
+当前速度
+切换速度 快速
+速度 深入
+```
+
 相关环境变量：
 
 ```bash

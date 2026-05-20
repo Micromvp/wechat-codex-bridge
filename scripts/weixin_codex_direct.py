@@ -35,6 +35,30 @@ DEFAULT_CODEX_RESUME_COMMAND = (
 SESSION_ID_RE = re.compile(
     r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
 )
+MODEL_RE = re.compile(r"^[A-Za-z0-9._:-]+$")
+SPEED_TO_EFFORT = {
+    "fast": "low",
+    "quick": "low",
+    "low": "low",
+    "快": "low",
+    "快速": "low",
+    "normal": "medium",
+    "medium": "medium",
+    "balanced": "medium",
+    "标准": "medium",
+    "普通": "medium",
+    "默认": "medium",
+    "deep": "high",
+    "slow": "high",
+    "high": "high",
+    "慢": "high",
+    "深入": "high",
+    "深度": "high",
+    "max": "xhigh",
+    "xhigh": "xhigh",
+    "最高": "xhigh",
+    "极致": "xhigh",
+}
 CHANNEL_VERSION = "2.1.8"
 ILINK_APP_ID = "bot"
 ILINK_APP_CLIENT_VERSION = str((2 << 16) | (1 << 8) | 8)
@@ -210,6 +234,43 @@ def bind_session(sessions, key, thread_id, thread_name=None):
     append_codex_session_index(thread_id, session["codex_thread_name"])
 
 
+def set_session_model(sessions, key, model):
+    session = sessions.setdefault(key, {})
+    if model.lower() in ("default", "reset") or model in ("默认", "清空"):
+        session.pop("codex_model", None)
+    else:
+        session["codex_model"] = model
+    session["updated_at"] = int(time.time())
+    save_sessions(sessions)
+
+
+def normalize_speed(value):
+    return SPEED_TO_EFFORT.get(value.strip().lower())
+
+
+def set_session_effort(sessions, key, effort):
+    session = sessions.setdefault(key, {})
+    if effort.lower() in ("default", "reset") or effort in ("默认", "清空"):
+        session.pop("codex_reasoning_effort", None)
+    else:
+        session["codex_reasoning_effort"] = effort
+    session["updated_at"] = int(time.time())
+    save_sessions(sessions)
+
+
+def session_settings_text(session):
+    thread_id = session.get("codex_thread_id") or "未绑定"
+    thread_name = session.get("codex_thread_name") or "未命名"
+    model = session.get("codex_model") or "默认"
+    effort = session.get("codex_reasoning_effort") or "默认"
+    return (
+        "当前微信用户设置：\n"
+        f"session: {thread_name}\n{thread_id}\n"
+        f"model: {model}\n"
+        f"speed/reasoning: {effort}"
+    )
+
+
 def handle_control_command(text, sessions, key):
     stripped = text.strip()
     lowered = stripped.lower()
@@ -246,6 +307,41 @@ def handle_control_command(text, sessions, key):
         thread_name = (entry or {}).get("thread_name") or f"Codex Session: {thread_id[:8]}"
         bind_session(sessions, key, thread_id, thread_name=thread_name)
         return f"已切换当前微信用户绑定的 Codex session：\n{thread_name}\n{thread_id}"
+
+    if lowered in ("/settings", "settings", "设置", "当前设置"):
+        return session_settings_text(sessions.get(key) or {})
+
+    if lowered in ("/model", "model", "模型", "当前模型"):
+        model = (sessions.get(key) or {}).get("codex_model") or "默认"
+        return f"当前模型：{model}\n发送 /model <model> 切换，例如：/model gpt-5.5\n发送 /model default 恢复默认。"
+
+    if lowered.startswith("/model ") or stripped.startswith("切换模型 ") or stripped.startswith("模型 "):
+        model = stripped.split(maxsplit=1)[1].strip()
+        if model.lower() not in ("default", "reset") and model not in ("默认", "清空") and not MODEL_RE.match(model):
+            return "模型名格式不对。请发送类似：/model gpt-5.5，或 /model default 恢复默认。"
+        set_session_model(sessions, key, model)
+        current = (sessions.get(key) or {}).get("codex_model") or "默认"
+        return f"已切换当前微信用户的 Codex 模型：{current}"
+
+    if lowered in ("/speed", "speed", "/effort", "effort", "速度", "当前速度"):
+        effort = (sessions.get(key) or {}).get("codex_reasoning_effort") or "默认"
+        return (
+            f"当前速度/推理强度：{effort}\n"
+            "可选：fast/normal/deep/max，或 快速/标准/深入/极致。\n"
+            "发送 /speed default 恢复默认。"
+        )
+
+    if lowered.startswith("/speed ") or lowered.startswith("/effort ") or stripped.startswith("切换速度 ") or stripped.startswith("速度 "):
+        value = stripped.split(maxsplit=1)[1].strip()
+        if value.lower() in ("default", "reset") or value in ("默认", "清空"):
+            set_session_effort(sessions, key, value)
+        else:
+            effort = normalize_speed(value)
+            if not effort:
+                return "速度档位不支持。可选：fast/normal/deep/max，或 快速/标准/深入/极致。"
+            set_session_effort(sessions, key, effort)
+        current = (sessions.get(key) or {}).get("codex_reasoning_effort") or "默认"
+        return f"已切换当前微信用户的速度/推理强度：{current}"
 
     return None
 
@@ -354,6 +450,20 @@ def format_command(command, prompt, thread_id=None):
     return args, stdin
 
 
+def apply_codex_overrides(args, model=None, reasoning_effort=None):
+    if len(args) < 2 or args[0] != "codex" or args[1] != "exec":
+        return args
+    insert_at = 2
+    if len(args) > 2 and args[0] == "codex" and args[1] == "exec" and args[2] == "resume":
+        insert_at = 3
+    overrides = []
+    if model:
+        overrides.extend(["--model", model])
+    if reasoning_effort:
+        overrides.extend(["-c", f'model_reasoning_effort="{reasoning_effort}"'])
+    return args[:insert_at] + overrides + args[insert_at:]
+
+
 def parse_codex_json_output(stdout):
     reply = ""
     thread_id = None
@@ -373,8 +483,9 @@ def parse_codex_json_output(stdout):
     return thread_id, reply
 
 
-def run_codex(prompt, command, timeout, thread_id=None):
+def run_codex(prompt, command, timeout, thread_id=None, model=None, reasoning_effort=None):
     args, stdin = format_command(command, prompt, thread_id=thread_id)
+    args = apply_codex_overrides(args, model=model, reasoning_effort=reasoning_effort)
     result = subprocess.run(
         args,
         input=stdin,
@@ -388,9 +499,10 @@ def run_codex(prompt, command, timeout, thread_id=None):
     return extract_reply(result.stdout)
 
 
-def run_codex_thread(prompt, create_command, resume_command, timeout, thread_id=None):
+def run_codex_thread(prompt, create_command, resume_command, timeout, thread_id=None, model=None, reasoning_effort=None):
     command = resume_command if thread_id else create_command
     args, stdin = format_command(command, prompt, thread_id=thread_id)
+    args = apply_codex_overrides(args, model=model, reasoning_effort=reasoning_effort)
     result = subprocess.run(
         args,
         input=stdin,
@@ -479,6 +591,8 @@ def run_loop(args):
                     history = get_history(sessions, key)
                     session = sessions.setdefault(key, {})
                     thread_id = session.get("codex_thread_id") if args.native_session else None
+                    model = session.get("codex_model")
+                    reasoning_effort = session.get("codex_reasoning_effort")
                     prompt = build_prompt(text, message, history, use_native_session=args.native_session)
                     if args.native_session:
                         thread_id, reply = run_codex_thread(
@@ -487,6 +601,8 @@ def run_loop(args):
                             args.codex_resume_command,
                             args.codex_timeout,
                             thread_id=thread_id,
+                            model=model,
+                            reasoning_effort=reasoning_effort,
                         )
                         if thread_id:
                             session["codex_thread_id"] = thread_id
@@ -495,7 +611,13 @@ def run_loop(args):
                             save_sessions(sessions)
                             append_codex_session_index(thread_id, session["codex_thread_name"])
                     else:
-                        reply = run_codex(prompt, args.codex_command, args.codex_timeout)
+                        reply = run_codex(
+                            prompt,
+                            args.codex_command,
+                            args.codex_timeout,
+                            model=model,
+                            reasoning_effort=reasoning_effort,
+                        )
                 except Exception as exc:
                     reply = f"Codex 执行失败：{exc}"
                 append_history(sessions, key, "user", text, args.history_turns)
