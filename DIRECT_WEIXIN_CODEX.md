@@ -210,6 +210,42 @@ codex exec resume --json <thread_id> <prompt>
 速度 标准
 ```
 
+查看当前推理强度：
+
+```text
+/effort
+```
+
+切换推理强度：
+
+```text
+/effort low
+/effort medium
+/effort high
+/effort xhigh
+```
+
+恢复默认推理强度：
+
+```text
+/effort default
+```
+
+推理强度对应 Codex 的 `model_reasoning_effort`，和「速度」是两个独立设置：
+
+- `low` / `低`
+- `medium` / `中`
+- `high` / `高`
+- `xhigh` / `超高`
+
+中文命令：
+
+```text
+当前推理强度
+切换推理强度 高
+推理强度 超高
+```
+
 相关环境变量：
 
 ```bash

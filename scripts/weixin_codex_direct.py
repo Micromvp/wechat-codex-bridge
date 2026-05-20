@@ -44,6 +44,21 @@ SPEED_TO_SERVICE_TIER = {
     "快": "priority",
 }
 STANDARD_SPEED_VALUES = {"standard", "normal", "default", "reset", "标准", "普通", "默认", "清空"}
+EFFORT_TO_REASONING = {
+    "low": "low",
+    "低": "low",
+    "medium": "medium",
+    "med": "medium",
+    "中": "medium",
+    "high": "high",
+    "高": "high",
+    "xhigh": "xhigh",
+    "extra-high": "xhigh",
+    "extra_high": "xhigh",
+    "ultra": "xhigh",
+    "超高": "xhigh",
+}
+DEFAULT_EFFORT_VALUES = {"default", "reset", "默认", "清空"}
 CHANNEL_VERSION = "2.1.8"
 ILINK_APP_ID = "bot"
 ILINK_APP_CLIENT_VERSION = str((2 << 16) | (1 << 8) | 8)
@@ -239,7 +254,6 @@ def normalize_speed(value):
 
 def set_session_speed(sessions, key, service_tier):
     session = sessions.setdefault(key, {})
-    session.pop("codex_reasoning_effort", None)
     if service_tier:
         session["codex_service_tier"] = service_tier
     else:
@@ -248,16 +262,44 @@ def set_session_speed(sessions, key, service_tier):
     save_sessions(sessions)
 
 
+def normalize_effort(value):
+    value = value.strip()
+    lowered = value.lower()
+    if lowered in DEFAULT_EFFORT_VALUES or value in DEFAULT_EFFORT_VALUES:
+        return None
+    return EFFORT_TO_REASONING.get(lowered) or EFFORT_TO_REASONING.get(value)
+
+
+def set_session_effort(sessions, key, reasoning_effort):
+    session = sessions.setdefault(key, {})
+    if reasoning_effort:
+        session["codex_reasoning_effort"] = reasoning_effort
+        session["codex_effort_user_set"] = True
+    else:
+        session.pop("codex_reasoning_effort", None)
+        session.pop("codex_effort_user_set", None)
+    session["updated_at"] = int(time.time())
+    save_sessions(sessions)
+
+
+def get_session_effort(session):
+    if not session.get("codex_effort_user_set"):
+        return None
+    return session.get("codex_reasoning_effort")
+
+
 def session_settings_text(session):
     thread_id = session.get("codex_thread_id") or "未绑定"
     thread_name = session.get("codex_thread_name") or "未命名"
     model = session.get("codex_model") or "默认"
     speed = "快速" if session.get("codex_service_tier") == "priority" else "标准"
+    effort = get_session_effort(session) or "默认"
     return (
         "当前微信用户设置：\n"
         f"session: {thread_name}\n{thread_id}\n"
         f"model: {model}\n"
-        f"speed: {speed}"
+        f"speed: {speed}\n"
+        f"effort: {effort}"
     )
 
 
@@ -334,6 +376,31 @@ def handle_control_command(text, sessions, key):
             return "已切换当前微信用户的速度：快速（1.5 倍速，用量增加）"
         else:
             return f"已切换当前微信用户的速度：{service_tier}"
+
+    if lowered in ("/effort", "effort", "推理", "推理强度", "当前推理", "当前推理强度"):
+        effort = get_session_effort(sessions.get(key) or {}) or "默认"
+        return (
+            f"当前推理强度：{effort}\n"
+            "可选：low/medium/high/xhigh，或 低/中/高/超高。\n"
+            "发送 /effort default 恢复默认。"
+        )
+
+    if (
+        lowered.startswith("/effort ")
+        or stripped.startswith("切换推理 ")
+        or stripped.startswith("切换推理强度 ")
+        or stripped.startswith("推理 ")
+        or stripped.startswith("推理强度 ")
+    ):
+        value = stripped.split(maxsplit=1)[1].strip()
+        if value.lower() in DEFAULT_EFFORT_VALUES or value in DEFAULT_EFFORT_VALUES:
+            set_session_effort(sessions, key, None)
+            return "已恢复当前微信用户的推理强度：默认"
+        reasoning_effort = normalize_effort(value)
+        if not reasoning_effort:
+            return "推理强度不支持。可选：low/medium/high/xhigh，或 低/中/高/超高。"
+        set_session_effort(sessions, key, reasoning_effort)
+        return f"已切换当前微信用户的推理强度：{reasoning_effort}"
 
     return None
 
@@ -442,7 +509,7 @@ def format_command(command, prompt, thread_id=None):
     return args, stdin
 
 
-def apply_codex_overrides(args, model=None, service_tier=None):
+def apply_codex_overrides(args, model=None, service_tier=None, reasoning_effort=None):
     if len(args) < 2 or args[0] != "codex" or args[1] != "exec":
         return args
     insert_at = 2
@@ -453,6 +520,8 @@ def apply_codex_overrides(args, model=None, service_tier=None):
         overrides.extend(["--model", model])
     if service_tier:
         overrides.extend(["-c", f'service_tier="{service_tier}"'])
+    if reasoning_effort:
+        overrides.extend(["-c", f'model_reasoning_effort="{reasoning_effort}"'])
     return args[:insert_at] + overrides + args[insert_at:]
 
 
@@ -475,9 +544,9 @@ def parse_codex_json_output(stdout):
     return thread_id, reply
 
 
-def run_codex(prompt, command, timeout, thread_id=None, model=None, service_tier=None):
+def run_codex(prompt, command, timeout, thread_id=None, model=None, service_tier=None, reasoning_effort=None):
     args, stdin = format_command(command, prompt, thread_id=thread_id)
-    args = apply_codex_overrides(args, model=model, service_tier=service_tier)
+    args = apply_codex_overrides(args, model=model, service_tier=service_tier, reasoning_effort=reasoning_effort)
     result = subprocess.run(
         args,
         input=stdin,
@@ -491,10 +560,19 @@ def run_codex(prompt, command, timeout, thread_id=None, model=None, service_tier
     return extract_reply(result.stdout)
 
 
-def run_codex_thread(prompt, create_command, resume_command, timeout, thread_id=None, model=None, service_tier=None):
+def run_codex_thread(
+    prompt,
+    create_command,
+    resume_command,
+    timeout,
+    thread_id=None,
+    model=None,
+    service_tier=None,
+    reasoning_effort=None,
+):
     command = resume_command if thread_id else create_command
     args, stdin = format_command(command, prompt, thread_id=thread_id)
-    args = apply_codex_overrides(args, model=model, service_tier=service_tier)
+    args = apply_codex_overrides(args, model=model, service_tier=service_tier, reasoning_effort=reasoning_effort)
     result = subprocess.run(
         args,
         input=stdin,
@@ -585,6 +663,7 @@ def run_loop(args):
                     thread_id = session.get("codex_thread_id") if args.native_session else None
                     model = session.get("codex_model")
                     service_tier = session.get("codex_service_tier")
+                    reasoning_effort = get_session_effort(session)
                     prompt = build_prompt(text, message, history, use_native_session=args.native_session)
                     if args.native_session:
                         thread_id, reply = run_codex_thread(
@@ -595,6 +674,7 @@ def run_loop(args):
                             thread_id=thread_id,
                             model=model,
                             service_tier=service_tier,
+                            reasoning_effort=reasoning_effort,
                         )
                         if thread_id:
                             session["codex_thread_id"] = thread_id
@@ -609,6 +689,7 @@ def run_loop(args):
                             args.codex_timeout,
                             model=model,
                             service_tier=service_tier,
+                            reasoning_effort=reasoning_effort,
                         )
                 except Exception as exc:
                     reply = f"Codex 执行失败：{exc}"
