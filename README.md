@@ -129,21 +129,6 @@ Codex Desktop
 /settings
 ```
 
-查看剩余额度：
-
-```text
-/quota
-```
-
-`/quota` 会执行启动 bridge 时配置的 `WEIXIN_CODEX_QUOTA_COMMAND`，并把命令输出发回微信。Codex CLI 当前没有稳定的内置额度查询子命令，所以这里预留成可配置命令，方便接你自己的余额/额度接口。
-
-示例：
-
-```bash
-export WEIXIN_CODEX_QUOTA_COMMAND='python3 scripts/query_quota.py'
-./start_weixin_codex_direct.sh
-```
-
 查看或切换模型：
 
 ```text
@@ -292,8 +277,6 @@ http://127.0.0.1:8787
 - `WEIXIN_CODEX_RESUME_COMMAND`：继续已有 Codex 会话时执行的命令模板。
 - `WEIXIN_CODEX_NATIVE_SESSION`：是否使用 Codex 原生 session，默认开启。
 - `WEIXIN_CODEX_HISTORY_TURNS`：本地 fallback 历史保留轮数，默认 `20`。
-- `WEIXIN_CODEX_QUOTA_COMMAND`：`/quota` 使用的额度查询命令。
-- `WEIXIN_CODEX_QUOTA_TIMEOUT`：额度查询命令超时时间，默认 `30` 秒。
 
 ## 类 OpenClaw Bot 模式
 

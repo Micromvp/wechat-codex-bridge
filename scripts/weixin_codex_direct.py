@@ -26,7 +26,6 @@ LOCAL_DATA_DIR = Path(os.environ.get("WEIXIN_CODEX_DATA_DIR", ROOT_DIR / "data")
 SESSIONS_PATH = LOCAL_DATA_DIR / "weixin-codex-sessions.json"
 LOCK_PATH = LOCAL_DATA_DIR / "weixin-codex-direct.lock"
 SEEN_PATH = LOCAL_DATA_DIR / "weixin-codex-seen.json"
-DEFAULT_QUOTA_TIMEOUT = int(os.environ.get("WEIXIN_CODEX_QUOTA_TIMEOUT", "30"))
 DEFAULT_CODEX_COMMAND = (
     f"codex exec --json --cd {shlex.quote(str(CODEX_CWD))} --sandbox workspace-write {{prompt}}"
 )
@@ -272,33 +271,6 @@ def session_settings_text(session):
     )
 
 
-def run_quota_command():
-    command = os.environ.get("WEIXIN_CODEX_QUOTA_COMMAND", "").strip()
-    if not command:
-        return (
-            "还没有配置额度查询命令。\n"
-            "请在启动 bridge 前设置 WEIXIN_CODEX_QUOTA_COMMAND，例如指向你自己的余额/额度查询脚本。"
-        )
-    try:
-        result = subprocess.run(
-            shlex.split(command),
-            capture_output=True,
-            text=True,
-            timeout=DEFAULT_QUOTA_TIMEOUT,
-            cwd=str(CODEX_CWD),
-        )
-    except Exception as exc:
-        return f"额度查询失败：{exc}"
-    output = (result.stdout or result.stderr or "").strip()
-    if result.returncode != 0:
-        return f"额度查询失败：{output or f'exit code {result.returncode}'}"
-    if not output:
-        return "额度查询命令执行成功，但没有输出内容。"
-    if len(output) > 3500:
-        return output[:3500] + "\n...(额度输出过长，已截断)"
-    return output
-
-
 def handle_control_command(text, sessions, key):
     stripped = text.strip()
     lowered = stripped.lower()
@@ -338,9 +310,6 @@ def handle_control_command(text, sessions, key):
 
     if lowered in ("/settings", "settings", "设置", "当前设置"):
         return session_settings_text(sessions.get(key) or {})
-
-    if lowered in ("/quota", "quota", "/balance", "balance", "额度", "剩余额度", "查看额度"):
-        return run_quota_command()
 
     if lowered in ("/model", "model", "模型", "当前模型"):
         model = (sessions.get(key) or {}).get("codex_model") or "默认"

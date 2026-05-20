@@ -21,11 +21,6 @@ echo "Starting direct WeChat ClawBot -> Codex bridge"
 echo "Codex cwd: ${WEIXIN_CODEX_CWD}"
 echo "Command: ${WEIXIN_CODEX_COMMAND}"
 echo "Resume command: ${WEIXIN_CODEX_RESUME_COMMAND}"
-if [[ -n "${WEIXIN_CODEX_QUOTA_COMMAND:-}" ]]; then
-  echo "Quota command: ${WEIXIN_CODEX_QUOTA_COMMAND}"
-else
-  echo "Quota command: not configured"
-fi
 echo "Native Codex session: ${WEIXIN_CODEX_NATIVE_SESSION}"
 echo "History turns per WeChat user: ${WEIXIN_CODEX_HISTORY_TURNS}"
 
