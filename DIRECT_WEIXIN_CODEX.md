@@ -104,6 +104,44 @@ data/weixin-codex-sessions.json
 - 本地额外保留最近 20 轮对话，作为调试和 fallback 使用。
 - 每次拿到 Codex thread id 后，会把它追加写入 `~/.codex/session_index.jsonl`，方便 Codex Desktop 的会话列表识别。
 
+## 在微信里切换指定 Codex session
+
+你可以直接在微信 ClawBot 聊天里发送控制命令。控制命令由 bridge 本地处理，不会转发给 Codex。
+
+查看当前绑定：
+
+```text
+/session
+```
+
+列出最近的 Codex sessions：
+
+```text
+/sessions
+```
+
+切换当前微信用户绑定的 Codex session：
+
+```text
+/session 019e4447-e663-7011-99b5-5e1f5d7e380a
+```
+
+也可以用中文命令：
+
+```text
+当前会话
+会话列表
+切换会话 019e4447-e663-7011-99b5-5e1f5d7e380a
+```
+
+切换后，这个微信用户的后续普通消息都会通过：
+
+```bash
+codex exec resume --json <thread_id> <prompt>
+```
+
+继续你指定的 Codex session。
+
 相关环境变量：
 
 ```bash

@@ -5,6 +5,7 @@ import fcntl
 import json
 import os
 import random
+import re
 import shlex
 import subprocess
 import sys
@@ -30,6 +31,9 @@ DEFAULT_CODEX_COMMAND = (
 )
 DEFAULT_CODEX_RESUME_COMMAND = (
     "codex exec resume --json {thread_id} {prompt}"
+)
+SESSION_ID_RE = re.compile(
+    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
 )
 CHANNEL_VERSION = "2.1.8"
 ILINK_APP_ID = "bot"
@@ -99,6 +103,49 @@ def append_codex_session_index(thread_id, thread_name):
         handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
 
+def read_codex_session_index():
+    index_path = CODEX_HOME / "session_index.jsonl"
+    if not index_path.exists():
+        return []
+    entries = []
+    for line in index_path.read_text(encoding="utf-8", errors="replace").splitlines():
+        try:
+            entry = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(entry, dict) and entry.get("id"):
+            entries.append(entry)
+    return entries
+
+
+def find_codex_session_index_entry(thread_id):
+    for entry in reversed(read_codex_session_index()):
+        if entry.get("id") == thread_id:
+            return entry
+    return None
+
+
+def find_codex_session_file(thread_id):
+    sessions_dir = CODEX_HOME / "sessions"
+    if not sessions_dir.exists():
+        return None
+    return next(sessions_dir.rglob(f"*{thread_id}.jsonl"), None)
+
+
+def recent_codex_sessions(limit=8):
+    seen = set()
+    result = []
+    for entry in reversed(read_codex_session_index()):
+        thread_id = entry.get("id")
+        if not thread_id or thread_id in seen:
+            continue
+        seen.add(thread_id)
+        result.append(entry)
+        if len(result) >= limit:
+            break
+    return result
+
+
 def thread_name_for_message(text):
     compact = " ".join((text or "").split())
     if not compact:
@@ -152,6 +199,55 @@ def append_history(sessions, key, role, content, max_turns):
 def reset_history(sessions, key):
     sessions[key] = {"history": [], "updated_at": int(time.time())}
     save_sessions(sessions)
+
+
+def bind_session(sessions, key, thread_id, thread_name=None):
+    session = sessions.setdefault(key, {})
+    session["codex_thread_id"] = thread_id
+    session["codex_thread_name"] = thread_name or f"Codex Session: {thread_id[:8]}"
+    session["updated_at"] = int(time.time())
+    save_sessions(sessions)
+    append_codex_session_index(thread_id, session["codex_thread_name"])
+
+
+def handle_control_command(text, sessions, key):
+    stripped = text.strip()
+    lowered = stripped.lower()
+    if lowered in ("/reset", "reset", "清空上下文", "重置上下文"):
+        reset_history(sessions, key)
+        return "已清空这段微信会话绑定的 Codex session。"
+
+    if lowered in ("/session", "session", "当前会话", "会话"):
+        session = sessions.get(key) or {}
+        thread_id = session.get("codex_thread_id")
+        if not thread_id:
+            return "当前微信用户还没有绑定 Codex session。发送一条普通消息会自动创建，或发送 /session <thread_id> 手动绑定。"
+        thread_name = session.get("codex_thread_name") or "未命名"
+        return f"当前绑定的 Codex session：\n{thread_name}\n{thread_id}"
+
+    if lowered in ("/sessions", "sessions", "会话列表", "最近会话"):
+        entries = recent_codex_sessions()
+        if not entries:
+            return "没有找到 Codex session 索引。"
+        lines = ["最近的 Codex sessions："]
+        for entry in entries:
+            name = entry.get("thread_name") or "未命名"
+            lines.append(f"- {name}\n  {entry.get('id')}")
+        lines.append("发送 /session <thread_id> 可以切换当前微信用户绑定的会话。")
+        return "\n".join(lines)
+
+    if lowered.startswith("/session ") or stripped.startswith("切换会话 "):
+        thread_id = stripped.split(maxsplit=1)[1].strip()
+        if not SESSION_ID_RE.match(thread_id):
+            return "session id 格式不对。请发送类似：/session 019e4447-e663-7011-99b5-5e1f5d7e380a"
+        entry = find_codex_session_index_entry(thread_id)
+        if not entry and not find_codex_session_file(thread_id):
+            return "没有在本机 ~/.codex 里找到这个 Codex session。请确认 id 来自 Codex Desktop/CLI 的真实会话。"
+        thread_name = (entry or {}).get("thread_name") or f"Codex Session: {thread_id[:8]}"
+        bind_session(sessions, key, thread_id, thread_name=thread_name)
+        return f"已切换当前微信用户绑定的 Codex session：\n{thread_name}\n{thread_id}"
+
+    return None
 
 
 def common_headers(body):
@@ -373,11 +469,11 @@ def run_loop(args):
                 context_token = message.get("context_token")
                 key = session_key(message)
                 log(f"inbound from={to_user_id} message_id={message.get('message_id')} text={text[:80]!r}")
-                if text.strip().lower() in ("/reset", "reset", "清空上下文", "重置上下文"):
-                    reset_history(sessions, key)
-                    reply = "已清空这段微信会话绑定的 Codex session。"
+                control_reply = handle_control_command(text, sessions, key)
+                if control_reply:
+                    reply = control_reply
                     send_id = send_text(account, to_user_id, context_token, reply)
-                    log(f"sent reset ack to={to_user_id} client_id={send_id}")
+                    log(f"sent control ack to={to_user_id} client_id={send_id} reply={reply[:80]!r}")
                     continue
                 try:
                     history = get_history(sessions, key)

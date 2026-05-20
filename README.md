@@ -87,6 +87,8 @@ Codex Desktop
 
 这个模式会为每个微信用户绑定一个 Codex thread id。第一条消息创建 Codex 会话，后续消息使用 `codex exec resume` 继续同一个会话，避免 Codex 很快忘记上下文。
 
+你也可以在微信里发送 `/session <thread_id>`，把当前微信用户切换到某个指定的 Codex 会话；发送 `/sessions` 可以列出最近的 Codex sessions。
+
 ## 桌面辅助模式首次使用
 
 1. 在这台 Mac 上打开微信，并保持登录。
