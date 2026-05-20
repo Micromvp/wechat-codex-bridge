@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "wechat-codex-bridge": {
+      "command": "python3",
+      "args": [
+        "./scripts/wechat_bridge_mcp.py"
+      ],
+      "cwd": ".",
+      "env": {
+        "WECHAT_BRIDGE_BASE_URL": "http://127.0.0.1:8787",
+        "WECHAT_BRIDGE_TOKEN": ""
+      }
+    }
+  }
+}

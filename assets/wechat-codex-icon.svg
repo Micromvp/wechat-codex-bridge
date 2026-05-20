@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="WeChat Codex icon">
+  <rect width="64" height="64" rx="16" fill="#07C160"/>
+  <circle cx="27" cy="28" r="15" fill="#FFFFFF"/>
+  <circle cx="41" cy="38" r="12" fill="#DFF7E9"/>
+  <circle cx="22" cy="26" r="2.2" fill="#07C160"/>
+  <circle cx="31" cy="26" r="2.2" fill="#07C160"/>
+  <circle cx="37" cy="36" r="1.9" fill="#07C160"/>
+  <circle cx="44" cy="36" r="1.9" fill="#07C160"/>
+  <path d="M20 41l5-5h8l-3 7z" fill="#FFFFFF"/>
+  <path d="M39 51l4-4h6l-2 5z" fill="#DFF7E9"/>
+</svg>

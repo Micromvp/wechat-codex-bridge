@@ -1,0 +1,31 @@
+{
+  "bridgeBaseUrl": "http://127.0.0.1:8787",
+  "authHeader": "Bearer replace-with-WECHAT_BRIDGE_TOKEN-if-set",
+  "inboundEndpoint": "/bot/webhook",
+  "replyLookupEndpoint": "/bot/replies/{job_id}",
+  "ackEndpoint": "/bot/ack",
+  "syncPayload": {
+    "from": "wxid_sender",
+    "chat_id": "wxid_sender_or_room_id",
+    "message_id": "wechat-message-id",
+    "text": "user message text",
+    "source": "personal_wechat_bridge",
+    "async": false
+  },
+  "asyncPayload": {
+    "from": "wxid_sender",
+    "chat_id": "wxid_sender_or_room_id",
+    "message_id": "wechat-message-id",
+    "text": "user message text",
+    "source": "personal_wechat_bridge",
+    "async": true
+  },
+  "adapterFlow": [
+    "Receive a WeChat text message.",
+    "POST syncPayload or asyncPayload to /bot/webhook.",
+    "For sync mode, send response.reply back to the same WeChat chat.",
+    "For async mode, poll /bot/replies/{job_id} until status is completed.",
+    "Send job.result.reply back to WeChat.",
+    "POST /bot/ack with the outbound message id after WeChat send succeeds."
+  ]
+}

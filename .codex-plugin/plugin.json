@@ -1,0 +1,44 @@
+{
+  "name": "wechat-codex-bridge",
+  "version": "0.1.0",
+  "description": "Direct WeChat ClawBot bridge for Codex Desktop and Codex CLI.",
+  "author": {
+    "name": "Leo",
+    "url": "https://github.com/Micromvp"
+  },
+  "homepage": "https://github.com/Micromvp/wechat-codex-bridge",
+  "repository": "https://github.com/Micromvp/wechat-codex-bridge",
+  "license": "MIT",
+  "keywords": [
+    "wechat",
+    "mcp",
+    "chat",
+    "bridge",
+    "codex"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "WeChat Codex Chat",
+    "shortDescription": "Chat with WeChat contacts through a local bridge",
+    "longDescription": "Use a local MCP bridge to list chats, read messages, and send replies between WeChat and Codex Desktop. This plugin is designed to connect Codex to your own WeChat automation or bot service rather than hard-coding a single vendor implementation.",
+    "developerName": "Leo",
+    "category": "Communication",
+    "capabilities": [
+      "Interactive",
+      "Write"
+    ],
+    "websiteURL": "https://github.com/Micromvp/wechat-codex-bridge",
+    "privacyPolicyURL": "https://github.com/Micromvp/wechat-codex-bridge#privacy",
+    "termsOfServiceURL": "https://github.com/Micromvp/wechat-codex-bridge#terms",
+    "defaultPrompt": [
+      "Read my latest WeChat messages and summarize the important ones.",
+      "Draft a concise reply to this WeChat conversation in Chinese.",
+      "Send this note to the selected WeChat chat."
+    ],
+    "brandColor": "#07C160",
+    "composerIcon": "./assets/wechat-codex-icon.svg",
+    "logo": "./assets/wechat-codex-logo.svg",
+    "screenshots": []
+  }
+}
