@@ -42,7 +42,17 @@ npx -y @tencent-weixin/openclaw-weixin-cli install
 帮我看一下这个项目现在还有什么要做
 ```
 
-bridge 会把消息转给 Codex，Codex 执行后把结果回复到同一个微信聊天窗口。
+bridge 会把消息转给 Codex，并把执行过程中的阶段性说明、命令执行状态和最终结果都回复到同一个微信聊天窗口。
+
+过程消息默认开启。普通纯文本回答可能只有最终消息；如果 Codex 执行命令或发出阶段性说明，微信里会先收到类似下面的消息：
+
+```text
+Codex 已开始处理。
+正在执行命令：
+/bin/zsh -lc pwd
+命令完成，exit=0：
+...
+```
 
 ## 微信命令
 

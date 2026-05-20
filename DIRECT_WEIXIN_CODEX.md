@@ -9,9 +9,11 @@
 -> 腾讯 ilink bot API
 -> scripts/weixin_codex_direct.py
 -> codex exec / codex exec resume
--> ilink/bot/sendmessage
+-> ilink/bot/sendmessage（过程消息 + 最终结果）
 -> 微信 ClawBot 聊天窗口
 ```
+
+bridge 默认会流式转发 Codex 的阶段性事件：开始处理、命令开始、命令完成、命令输出预览，以及 Codex 主动发出的阶段性说明。普通纯文本回答可能只有最终消息；执行任务较长或涉及命令时，会在微信里陆续看到进度。
 
 ## 前置条件
 
@@ -250,8 +252,16 @@ codex exec resume --json <thread_id> <prompt>
 
 ```bash
 export WEIXIN_CODEX_NATIVE_SESSION=true
+export WEIXIN_CODEX_STREAM_UPDATES=true
 export WEIXIN_CODEX_HISTORY_TURNS=20
 export WEIXIN_CODEX_RESUME_COMMAND='codex exec resume --json {thread_id} {prompt}'
+./start_weixin_codex_direct.sh
+```
+
+如果你只想恢复成“执行完再回复一次”的模式，可以关闭过程消息：
+
+```bash
+export WEIXIN_CODEX_STREAM_UPDATES=false
 ./start_weixin_codex_direct.sh
 ```
 

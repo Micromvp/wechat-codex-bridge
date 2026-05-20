@@ -62,6 +62,7 @@ DEFAULT_EFFORT_VALUES = {"default", "reset", "默认", "清空"}
 CHANNEL_VERSION = "2.1.8"
 ILINK_APP_ID = "bot"
 ILINK_APP_CLIENT_VERSION = str((2 << 16) | (1 << 8) | 8)
+PROGRESS_PREVIEW_CHARS = 1200
 
 
 def log(message):
@@ -496,6 +497,13 @@ def extract_reply(stdout):
     return json.dumps(payload, ensure_ascii=False, indent=2)
 
 
+def clip_text(text, limit=PROGRESS_PREVIEW_CHARS):
+    text = (text or "").strip()
+    if len(text) <= limit:
+        return text
+    return text[:limit].rstrip() + "\n...（已截断）"
+
+
 def format_command(command, prompt, thread_id=None):
     args = shlex.split(command)
     if any("{prompt}" in arg or "{thread_id}" in arg for arg in args):
@@ -544,17 +552,122 @@ def parse_codex_json_output(stdout):
     return thread_id, reply
 
 
-def run_codex(prompt, command, timeout, thread_id=None, model=None, service_tier=None, reasoning_effort=None):
-    args, stdin = format_command(command, prompt, thread_id=thread_id)
-    args = apply_codex_overrides(args, model=model, service_tier=service_tier, reasoning_effort=reasoning_effort)
-    result = subprocess.run(
+def progress_text_from_event(event):
+    event_type = event.get("type")
+    if event_type == "turn.started":
+        return "Codex 已开始处理。"
+    item = event.get("item") or {}
+    item_type = item.get("type")
+    if item_type == "agent_message":
+        text = item.get("text") or ""
+        if text.strip():
+            return clip_text(text)
+    if item_type == "command_execution":
+        command = item.get("command") or ""
+        status = item.get("status") or ""
+        if event_type == "item.started" or status == "in_progress":
+            return f"正在执行命令：\n{clip_text(command, 500)}"
+        if event_type == "item.completed":
+            exit_code = item.get("exit_code")
+            output = clip_text(item.get("aggregated_output") or "")
+            if output:
+                return f"命令完成，exit={exit_code}：\n{clip_text(command, 500)}\n\n输出：\n{output}"
+            return f"命令完成，exit={exit_code}：\n{clip_text(command, 500)}"
+    if event_type == "item.started" and item_type:
+        return f"正在处理：{item_type}"
+    if event_type == "item.completed" and item_type and item_type != "agent_message":
+        return f"已完成：{item_type}"
+    return None
+
+
+def run_codex_streaming(
+    args,
+    stdin,
+    timeout,
+    progress_callback=None,
+    stream_updates=True,
+):
+    started_at = time.time()
+    stdout_lines = []
+    reply = ""
+    thread_id = None
+    last_progress = ""
+    process = subprocess.Popen(
         args,
-        input=stdin,
-        capture_output=True,
+        stdin=subprocess.PIPE if stdin is not None else None,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
         text=True,
-        timeout=timeout,
         cwd=str(CODEX_CWD),
     )
+    if stdin is not None and process.stdin:
+        process.stdin.write(stdin)
+        process.stdin.close()
+    try:
+        for line in process.stdout or []:
+            stdout_lines.append(line)
+            if time.time() - started_at > timeout:
+                process.kill()
+                raise TimeoutError(f"Codex command timed out after {timeout}s")
+            stripped = line.strip()
+            if not stripped.startswith("{"):
+                continue
+            try:
+                event = json.loads(stripped)
+            except json.JSONDecodeError:
+                continue
+            if event.get("type") == "thread.started":
+                thread_id = event.get("thread_id") or thread_id
+            item = event.get("item") or {}
+            if event.get("type") == "item.completed" and item.get("type") == "agent_message":
+                reply = item.get("text") or reply
+            progress = progress_text_from_event(event)
+            if (
+                stream_updates
+                and progress_callback
+                and progress
+                and progress != last_progress
+            ):
+                progress_callback(progress)
+                last_progress = progress
+        return_code = process.wait(timeout=max(1, int(timeout - (time.time() - started_at))))
+    except Exception:
+        if process.poll() is None:
+            process.kill()
+        raise
+    stdout = "".join(stdout_lines)
+    if return_code != 0:
+        raise RuntimeError(stdout.strip() or "Codex command failed")
+    if not reply:
+        parsed_thread_id, parsed_reply = parse_codex_json_output(stdout)
+        thread_id = thread_id or parsed_thread_id
+        reply = parsed_reply or extract_reply(stdout)
+    return thread_id, reply
+
+
+def run_codex(
+    prompt,
+    command,
+    timeout,
+    thread_id=None,
+    model=None,
+    service_tier=None,
+    reasoning_effort=None,
+    progress_callback=None,
+    stream_updates=True,
+):
+    args, stdin = format_command(command, prompt, thread_id=thread_id)
+    args = apply_codex_overrides(args, model=model, service_tier=service_tier, reasoning_effort=reasoning_effort)
+    if progress_callback:
+        _, reply = run_codex_streaming(
+            args,
+            stdin,
+            timeout,
+            progress_callback=progress_callback,
+            stream_updates=stream_updates,
+        )
+        return reply
+    result = subprocess.run(args, input=stdin, capture_output=True, text=True, timeout=timeout, cwd=str(CODEX_CWD))
     if result.returncode != 0:
         raise RuntimeError(result.stderr.strip() or result.stdout.strip() or "Codex command failed")
     return extract_reply(result.stdout)
@@ -569,18 +682,22 @@ def run_codex_thread(
     model=None,
     service_tier=None,
     reasoning_effort=None,
+    progress_callback=None,
+    stream_updates=True,
 ):
     command = resume_command if thread_id else create_command
     args, stdin = format_command(command, prompt, thread_id=thread_id)
     args = apply_codex_overrides(args, model=model, service_tier=service_tier, reasoning_effort=reasoning_effort)
-    result = subprocess.run(
-        args,
-        input=stdin,
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-        cwd=str(CODEX_CWD),
-    )
+    if progress_callback:
+        streamed_thread_id, reply = run_codex_streaming(
+            args,
+            stdin,
+            timeout,
+            progress_callback=progress_callback,
+            stream_updates=stream_updates,
+        )
+        return streamed_thread_id or thread_id, reply
+    result = subprocess.run(args, input=stdin, capture_output=True, text=True, timeout=timeout, cwd=str(CODEX_CWD))
     if result.returncode != 0:
         raise RuntimeError(result.stderr.strip() or result.stdout.strip() or "Codex command failed")
     parsed_thread_id, reply = parse_codex_json_output(result.stdout)
@@ -657,6 +774,7 @@ def run_loop(args):
                     send_id = send_text(account, to_user_id, context_token, reply)
                     log(f"sent control ack to={to_user_id} client_id={send_id} reply={reply[:80]!r}")
                     continue
+                progress_messages = []
                 try:
                     history = get_history(sessions, key)
                     session = sessions.setdefault(key, {})
@@ -665,6 +783,19 @@ def run_loop(args):
                     service_tier = session.get("codex_service_tier")
                     reasoning_effort = get_session_effort(session)
                     prompt = build_prompt(text, message, history, use_native_session=args.native_session)
+
+                    def send_progress(progress_text):
+                        progress_text = clip_text(progress_text, PROGRESS_PREVIEW_CHARS)
+                        progress_messages.append(progress_text)
+                        try:
+                            progress_send_id = send_text(account, to_user_id, context_token, progress_text)
+                            log(
+                                f"sent progress to={to_user_id} "
+                                f"client_id={progress_send_id} reply={progress_text[:80]!r}"
+                            )
+                        except Exception as progress_exc:
+                            log(f"progress send failed: {progress_exc}")
+
                     if args.native_session:
                         thread_id, reply = run_codex_thread(
                             prompt,
@@ -675,6 +806,8 @@ def run_loop(args):
                             model=model,
                             service_tier=service_tier,
                             reasoning_effort=reasoning_effort,
+                            progress_callback=send_progress if args.stream_updates else None,
+                            stream_updates=args.stream_updates,
                         )
                         if thread_id:
                             session["codex_thread_id"] = thread_id
@@ -690,13 +823,18 @@ def run_loop(args):
                             model=model,
                             service_tier=service_tier,
                             reasoning_effort=reasoning_effort,
+                            progress_callback=send_progress if args.stream_updates else None,
+                            stream_updates=args.stream_updates,
                         )
                 except Exception as exc:
                     reply = f"Codex 执行失败：{exc}"
                 append_history(sessions, key, "user", text, args.history_turns)
                 append_history(sessions, key, "assistant", reply, args.history_turns)
-                send_id = send_text(account, to_user_id, context_token, reply)
-                log(f"sent to={to_user_id} client_id={send_id} reply={reply[:80]!r}")
+                if args.stream_updates and progress_messages and progress_messages[-1].strip() == (reply or "").strip():
+                    log(f"final reply already sent as progress to={to_user_id} reply={reply[:80]!r}")
+                else:
+                    send_id = send_text(account, to_user_id, context_token, reply)
+                    log(f"sent to={to_user_id} client_id={send_id} reply={reply[:80]!r}")
         except KeyboardInterrupt:
             raise
         except Exception as exc:
@@ -712,6 +850,7 @@ def main():
     parser.add_argument("--codex-timeout", type=int, default=int(os.environ.get("WEIXIN_CODEX_TIMEOUT", "180")))
     parser.add_argument("--history-turns", type=int, default=int(os.environ.get("WEIXIN_CODEX_HISTORY_TURNS", "20")))
     parser.add_argument("--native-session", action=argparse.BooleanOptionalAction, default=os.environ.get("WEIXIN_CODEX_NATIVE_SESSION", "true").lower() not in ("0", "false", "no", "off"))
+    parser.add_argument("--stream-updates", action=argparse.BooleanOptionalAction, default=os.environ.get("WEIXIN_CODEX_STREAM_UPDATES", "true").lower() not in ("0", "false", "no", "off"))
     parser.add_argument("--interval", type=float, default=2.0)
     parser.add_argument("--reset-sync", action="store_true")
     args = parser.parse_args()
