@@ -460,12 +460,22 @@ def text_from_message(message):
     return "\n".join(parts).strip()
 
 
-def build_prompt(text, message, history, use_native_session=False):
+def build_prompt(
+    text,
+    message,
+    history,
+    use_native_session=False,
+    codex_thread_id=None,
+    codex_thread_name=None,
+):
     context = {
         "channel": "wechat-clawbot-direct",
         "from_user_id": message.get("from_user_id"),
         "to_user_id": message.get("to_user_id"),
-        "session_id": message.get("session_id"),
+        "wechat_session_id": message.get("session_id") or "",
+        "codex_thread_id": codex_thread_id or "",
+        "codex_thread_name": codex_thread_name or "",
+        "native_codex_session_enabled": bool(use_native_session),
         "message_id": message.get("message_id"),
         "message": text,
     }
@@ -475,6 +485,7 @@ def build_prompt(text, message, history, use_native_session=False):
     return (
         "You are Codex replying to a WeChat ClawBot message. "
         "Reply in the user's language unless they ask otherwise.\n"
+        "The active Codex session is `codex_thread_id`; do not treat `wechat_session_id` as the Codex session.\n"
         "If the user says /reset, the local WeChat-to-Codex session is cleared.\n"
         "Keep replies concise for WeChat, but do not omit important steps when the user asks for implementation help.\n\n"
         f"Conversation history fallback:\n{history_text or '(native Codex session is handling continuity)'}\n\n"
@@ -782,7 +793,14 @@ def run_loop(args):
                     model = session.get("codex_model")
                     service_tier = session.get("codex_service_tier")
                     reasoning_effort = get_session_effort(session)
-                    prompt = build_prompt(text, message, history, use_native_session=args.native_session)
+                    prompt = build_prompt(
+                        text,
+                        message,
+                        history,
+                        use_native_session=args.native_session,
+                        codex_thread_id=thread_id,
+                        codex_thread_name=session.get("codex_thread_name"),
+                    )
 
                     def send_progress(progress_text):
                         progress_text = clip_text(progress_text, PROGRESS_PREVIEW_CHARS)
