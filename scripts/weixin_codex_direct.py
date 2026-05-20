@@ -830,11 +830,9 @@ def run_loop(args):
                     reply = f"Codex 执行失败：{exc}"
                 append_history(sessions, key, "user", text, args.history_turns)
                 append_history(sessions, key, "assistant", reply, args.history_turns)
-                if args.stream_updates and progress_messages and progress_messages[-1].strip() == (reply or "").strip():
-                    log(f"final reply already sent as progress to={to_user_id} reply={reply[:80]!r}")
-                else:
-                    send_id = send_text(account, to_user_id, context_token, reply)
-                    log(f"sent to={to_user_id} client_id={send_id} reply={reply[:80]!r}")
+                final_reply = f"最终回答：\n{reply}"
+                send_id = send_text(account, to_user_id, context_token, final_reply)
+                log(f"sent final to={to_user_id} client_id={send_id} reply={reply[:80]!r}")
         except KeyboardInterrupt:
             raise
         except Exception as exc:
